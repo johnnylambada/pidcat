@@ -26,6 +26,7 @@ import sys
 import re
 import subprocess
 from subprocess import PIPE
+from datetime import datetime
 
 __version__ = '2.1.0'
 
@@ -46,6 +47,10 @@ parser.add_argument('-t', '--tag', dest='tag', action='append', help='Filter out
 parser.add_argument('-i', '--ignore-tag', dest='ignored_tag', action='append', help='Filter output by ignoring specified tag(s)')
 parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__, help='Print the version number and exit')
 parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
+parser.add_argument('-f', '--file', nargs='?', dest='filename',
+                    const=datetime.now().strftime("logcat-%y%m%d-%H%M%S.log"),
+                    default=argparse.SUPPRESS,
+                    help='Store output in a file too')
 
 args = parser.parse_args()
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
@@ -68,6 +73,10 @@ if args.current_app:
 
 if len(package) == 0:
   args.all = True
+
+logfile = None
+if hasattr(args, 'filename'):
+  logfile = open(args.filename, 'w')
 
 # Store the names of packages for which to match all processes.
 catchall_package = list(filter(lambda package: package.find(":") == -1, package))
@@ -254,6 +263,12 @@ def parse_start_proc(line):
 def tag_in_tags_regex(tag, tags):
   return any(re.match(r'^' + t + r'$', tag) for t in map(str.strip, tags))
 
+def output(line):
+  print(line)
+  if (logfile is not None):
+    logfile.write(line+'\n')
+    logfile.flush()
+
 ps_command = base_adb_command + ['shell', 'ps']
 ps_pid = subprocess.Popen(ps_command, stdin=PIPE, stdout=PIPE, stderr=PIPE)
 while True:
@@ -304,7 +319,7 @@ while adb.poll() is None:
       linebuf += colorize(' ' * (header_size - 1), bg=WHITE)
       linebuf += ' PID: %s   UID: %s   GIDs: %s' % (line_pid, line_uid, line_gids)
       linebuf += '\n'
-      print(linebuf)
+      output(linebuf)
       last_tag = None # Ensure next log gets a tag printed
 
   dead_pid, dead_pname = parse_death(tag, message)
@@ -314,7 +329,7 @@ while adb.poll() is None:
     linebuf += colorize(' ' * (header_size - 1), bg=RED)
     linebuf += ' Process %s (PID: %s) ended' % (dead_pname, dead_pid)
     linebuf += '\n'
-    print(linebuf)
+    output(linebuf)
     last_tag = None # Ensure next log gets a tag printed
 
   # Make sure the backtrace is printed after a native crash
@@ -359,4 +374,4 @@ while adb.poll() is None:
     message = matcher.sub(replace, message)
 
   linebuf += indent_wrap(message)
-  print(linebuf.encode('utf-8'))
+  output(linebuf)
