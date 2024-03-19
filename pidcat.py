@@ -27,6 +27,7 @@ import re
 import subprocess
 from subprocess import PIPE
 from datetime import datetime
+import time
 
 __version__ = '2.1.0'
 
@@ -34,35 +35,30 @@ LOG_LEVELS = 'VDIWEF'
 LOG_LEVELS_MAP = dict([(LOG_LEVELS[i], i) for i in range(len(LOG_LEVELS))])
 parser = argparse.ArgumentParser(description='Filter logcat by package name')
 parser.add_argument('package', nargs='*', help='Application package name(s)')
-parser.add_argument('-w', '--tag-width', metavar='N', dest='tag_width', type=int, default=23, help='Width of log tag')
-parser.add_argument('-l', '--min-level', dest='min_level', type=str, choices=LOG_LEVELS+LOG_LEVELS.lower(), default='V', help='Minimum level to be displayed')
-parser.add_argument('--color-gc', dest='color_gc', action='store_true', help='Color garbage collection')
 parser.add_argument('--always-display-tags', dest='always_tags', action='store_true',help='Always display the tag name')
+parser.add_argument('--color-gc', dest='color_gc', action='store_true', help='Color garbage collection')
 parser.add_argument('--current', dest='current_app', action='store_true',help='Filter logcat by current running app')
-parser.add_argument('-s', '--serial', dest='device_serial', help='Device serial number (adb -s option)')
+parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
+parser.add_argument('-c', '--clear', dest='clear_logcat', action='store_true', help='Clear the entire log before running')
 parser.add_argument('-d', '--device', dest='use_device', action='store_true', help='Use first device for log input (adb -d option)')
 parser.add_argument('-e', '--emulator', dest='use_emulator', action='store_true', help='Use first emulator for log input (adb -e option)')
-parser.add_argument('-c', '--clear', dest='clear_logcat', action='store_true', help='Clear the entire log before running')
-parser.add_argument('-t', '--tag', dest='tag', action='append', help='Filter output by specified tag(s)')
+parser.add_argument('-f', '--file', nargs='?', dest='filename', const=datetime.now().strftime("logcat-%y%m%d-%H%M%S.log"), default=argparse.SUPPRESS, help='Store output in a file too')
+parser.add_argument('-g', '--time', dest='show_time', action='store_true', default=False, help='Show the time reported')
 parser.add_argument('-i', '--ignore-tag', dest='ignored_tag', action='append', help='Filter output by ignoring specified tag(s)')
+parser.add_argument('-l', '--min-level', dest='min_level', type=str, choices=LOG_LEVELS+LOG_LEVELS.lower(), default='V', help='Minimum level to be displayed')
 parser.add_argument('-m', '--msgs', dest='msg', action='append', help='Only output messages with regex(s)')
-parser.add_argument('-x', '--ignore-msg', dest='ignored_msg', action='append', help='Filter out messages with regex(s)')
-parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__, help='Print the version number and exit')
-parser.add_argument('-a', '--all', dest='all', action='store_true', default=False, help='Print all log messages')
 parser.add_argument('-n', '--no-color', dest='no_color', action='store_true', default=False, help='Do not use colorful output')
-parser.add_argument('-f', '--file', nargs='?', dest='filename',
-                    const=datetime.now().strftime("logcat-%y%m%d-%H%M%S.log"),
-                    default=argparse.SUPPRESS,
-                    help='Store output in a file too')
-
-
-# parser.add_argument('-m', '--msg', dest='msg', action='append', help='Only output messages with regex(s)')
-# parser.add_argument('-n', '--ignore-msg', dest='ignored_msg', action='append', help='Filter out messages with regex(s)')
+parser.add_argument('-s', '--serial', dest='device_serial', help='Device serial number (adb -s option)')
+parser.add_argument('-t', '--tag', dest='tag', action='append', help='Filter output by specified tag(s)')
+parser.add_argument('-v', '--version', action='version', version='%(prog)s ' + __version__, help='Print the version number and exit')
+parser.add_argument('-w', '--tag-width', metavar='N', dest='tag_width', type=int, default=23, help='Width of log tag')
+parser.add_argument('-x', '--ignore-msg', dest='ignored_msg', action='append', help='Filter out messages with regex(s)')
 
 args = parser.parse_args()
 min_level = LOG_LEVELS_MAP[args.min_level.upper()]
 
 package = args.package
+start_time = None
 
 base_adb_command = ['adb']
 if args.device_serial:
@@ -94,6 +90,7 @@ named_processes = list(filter(lambda package: package.find(":") != -1, package))
 named_processes = map(lambda package: package if package.find(":") != len(package) - 1 else package[:-1], named_processes)
 
 header_size = args.tag_width + 1 + 3 + 1 # space, level, space
+header_size += 9 if (args.show_time) else 0
 
 stdout_isatty = sys.stdout.isatty()
 
@@ -363,7 +360,15 @@ while adb.poll() is None:
   if args.ignored_msg and msg_in_msgs_regex(message, args.ignored_msg):
     continue
 
-  linebuf = ''
+  if (args.show_time):
+    if (start_time == None):
+      start_time = time.time()
+    elapsed_time = time.time() - start_time
+    sec = int(elapsed_time)
+    msec = int((elapsed_time - sec) * 1000)
+    linebuf = f"{sec:04d}.{msec:03d} "
+  else:
+    linebuf = ''
 
   if args.tag_width > 0:
     # right-align tag title and allocate color if needed
